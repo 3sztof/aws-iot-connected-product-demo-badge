@@ -27,7 +27,7 @@
     "bootstrap-icons": "^1.11.1",
     "es-module-shims": "^1.8.0",
     "lil-gui": "^0.18.2",
-    "mqtt": "^5.1.2",
+    "mqtt": "^5.15.0",
     "qrious": "^4.0.2",
     "three": "^0.157.0",
     "uuid": "^9.0.1",

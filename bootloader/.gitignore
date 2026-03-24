@@ -1,2 +1,6 @@
 Adafruit_nRF52_Bootloader/
-build/
+
+# Ignore intermediate build artifacts but keep the DFU zip and UF2
+build/*.elf
+build/*.hex
+build/update-bootloader.uf2

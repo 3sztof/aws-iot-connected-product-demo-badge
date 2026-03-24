@@ -1,0 +1,4 @@
+# Build artifacts — reconstructable with: make
+build/
+*.o
+*.su

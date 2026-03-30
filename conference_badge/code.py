@@ -129,7 +129,8 @@ def load_image_into(group, path):
             path, bitmap=displayio.Bitmap, palette=displayio.Palette
         )
         group.y = (280 - bmp.height) // 2
-        group.append(displayio.TileGrid(bmp, pixel_shader=pal))
+        x_off = (240 - bmp.width) // 2
+        group.append(displayio.TileGrid(bmp, pixel_shader=pal, x=x_off))
     except Exception as e:
         print("Image error", path, e)
         group.y = 0
@@ -234,12 +235,12 @@ sensor_group, sensor_readings_label = make_sensor_group()
 qr_group = make_qr_group(LINKEDIN_URL)
 _img_group = displayio.Group()
 
-_name_first = label.Label(terminalio.FONT, text="Krzysztof", color=0xFFFFFF, scale=1)
+_name_first = label.Label(terminalio.FONT, text="Krzysztof", color=0xFFFFFF, scale=2)
 _name_first.anchor_point = (0.5, 0.5)
-_name_first.anchored_position = (120, -10)
-_name_last = label.Label(terminalio.FONT, text="Wilczynski", color=0xFFFFFF, scale=1)
+_name_first.anchored_position = (120, -20)
+_name_last = label.Label(terminalio.FONT, text="Wilczynski", color=0xFFFFFF, scale=2)
 _name_last.anchor_point = (0.5, 0.5)
-_name_last.anchored_position = (120, 250)
+_name_last.anchored_position = (120, 220)
 
 gc.collect()
 print("Free RAM after init:", gc.mem_free())
@@ -248,6 +249,7 @@ current_slide = 0
 auto_play = True
 last_advance = time.monotonic()
 last_btn_time = 0
+last_sensor_update = 0
 DEBOUNCE = 0.25
 
 
@@ -308,7 +310,9 @@ while True:
         show_slide(current_slide + 1)
 
     if current_slide == SLIDE_SENSORS:
-        update_sensor_text(sensor_readings_label)
+        if now - last_sensor_update >= 1.0:
+            update_sensor_text(sensor_readings_label)
+            last_sensor_update = now
 
     led_step()
     time.sleep(0.01)

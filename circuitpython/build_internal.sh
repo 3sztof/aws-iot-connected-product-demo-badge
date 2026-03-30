@@ -56,6 +56,14 @@ CIRCUITPY_SHARPDISPLAY = 0
 CIRCUITPY_RGBMATRIX = 0
 CIRCUITPY_GIFIO = 0
 CIRCUITPY_EPAPERDISPLAY = 0
+
+# Explicitly enable modules that code.py needs (disabled by FULL_BUILD=0)
+CIRCUITPY_DISPLAYIO = 1
+CIRCUITPY_BUSIO = 1
+CIRCUITPY_ANALOGIO = 1
+CIRCUITPY_DIGITALIO = 1
+CIRCUITPY_NEOPIXEL_WRITE = 1
+CIRCUITPY_TERMINALIO = 1
 EOF
 
 # Fix 1: patch preprocess_frozen_modules.py to handle shallow clones with no tags

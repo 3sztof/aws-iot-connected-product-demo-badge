@@ -5,21 +5,19 @@ Turn your AWS IoT Demo Badge into a conference badge with an offline slideshow, 
 ## What You Get
 
 - Auto-cycling slideshow: your photo → company logo → LinkedIn QR code → live sensor readings
-- Button controls: previous / next / play-pause / LED toggle
-- Rainbow LED animation on the 3 NeoPixels
+- Name labels on your photo slide (first name top, last name bottom)
+- Button controls: previous / next / play-pause / LED brightness cycling
+- Rainbow LED animation on the 3 NeoPixels with 3 brightness levels
 - Fully offline — no WiFi or cloud needed
 
 ## Prerequisites
 
 - AWS IoT Demo Badge 2023
 - USB cable
-- Your images (240×240 BMP format)
+- Python 3 with Pillow (`pip install Pillow`) for image conversion
+- Your images (JPEG/PNG, any size — the conversion script handles resizing)
 
 ## Step 1 — Prepare Your Images
-
-### Image requirements
-
-The badge display is 240×240 pixels. CircuitPython needs indexed-color BMP files (256 colors max, BMP3 format).
 
 ### Directory structure
 
@@ -34,78 +32,111 @@ conference_badge/images/
 
 ### Converting images
 
-Requires ImageMagick (`brew install imagemagick`).
+The badge display is 240×280 pixels (1.69" ST7789V). Images must be uncompressed indexed-color BMP files.
 
-**Headshot / square photo** — crops and fills the full 240×240 area:
+**Use the Python conversion script** (recommended over ImageMagick — ensures correct BMP format for CircuitPython's `OnDiskBitmap`):
 
-```bash
-convert images/raw/me.jpeg \
-    -resize 240x240^ -gravity center -extent 240x240 \
-    -colors 256 -type palette BMP3:images/photo.bmp
+```python
+import struct
+from PIL import Image, ImageEnhance
+
+def write_bmp3_8bit(img_rgb, path, colors=256):
+    """Write uncompressed 8-bit indexed BMP3 with BGRA palette."""
+    if img_rgb.mode != "RGB":
+        img_rgb = img_rgb.convert("RGB")
+    indexed = img_rgb.quantize(colors=colors, method=Image.Quantize.MEDIANCUT,
+                                dither=Image.Dither.FLOYDSTEINBERG)
+    width, height = indexed.size
+    pil_pal = indexed.getpalette()
+    pixels = indexed.tobytes()
+    row_stride = (width + 3) & ~3
+    pal_size = colors * 4
+    data_offset = 14 + 40 + pal_size
+    pix_size = row_stride * height
+    with open(path, 'wb') as f:
+        f.write(b'BM')
+        f.write(struct.pack('<I', data_offset + pix_size))
+        f.write(b'\x00\x00\x00\x00')
+        f.write(struct.pack('<I', data_offset))
+        f.write(struct.pack('<I', 40))
+        f.write(struct.pack('<ii', width, height))
+        f.write(struct.pack('<HH', 1, 8))
+        f.write(struct.pack('<I', 0))
+        f.write(struct.pack('<I', pix_size))
+        f.write(struct.pack('<iiii', 0, 0, colors, 0))
+        for i in range(colors):
+            r, g, b = pil_pal[i*3], pil_pal[i*3+1], pil_pal[i*3+2]
+            f.write(struct.pack('BBBB', b, g, r, 0))
+        for y in range(height - 1, -1, -1):
+            f.write(pixels[y * width:(y + 1) * width])
+            if row_stride - width:
+                f.write(b'\x00' * (row_stride - width))
+
+# --- Photo: 200×200 at 256 colors ---
+photo = Image.open("images/raw/me.jpeg").convert("RGB")
+w, h = photo.size
+side = min(w, h)
+left, top = (w - side) // 2, (h - side) // 2
+photo = photo.crop((left, top, left + side, top + side)).resize((200, 200), Image.LANCZOS)
+photo = ImageEnhance.Brightness(photo).enhance(0.95)
+photo = ImageEnhance.Color(photo).enhance(0.70)
+# Push dark background pixels to pure black
+px = photo.load()
+for y in range(200):
+    for x in range(200):
+        r, g, b = px[x, y]
+        if r * 0.299 + g * 0.587 + b * 0.114 < 35:
+            px[x, y] = (0, 0, 0)
+write_bmp3_8bit(photo, "images/photo.bmp")
+
+# --- Logo: 240×280 at 16 colors (fills entire display) ---
+AWS_BG = (4, 39, 58)  # AWS Squid Ink — sampled from the official logo PNG
+logo_rgba = Image.open("images/raw/aws_logo.png").convert("RGBA")
+logo_rgba.thumbnail((220, 250), Image.LANCZOS)
+bg = Image.new("RGB", (240, 280), AWS_BG)
+bg.paste(logo_rgba, ((240 - logo_rgba.width) // 2, (280 - logo_rgba.height) // 2), logo_rgba)
+# 4-bit BMP for logo (only ~3 distinct colors, saves RAM)
+indexed = bg.convert("RGB").quantize(colors=16, method=Image.Quantize.MEDIANCUT,
+                                      dither=Image.Dither.FLOYDSTEINBERG)
+# Use write_bmp3_4bit or convert with the same pattern at bpp=4
 ```
 
-**Logo / non-square image** — scales to fit inside 240×240 with a white background, centered:
+> **Important**: Do NOT use RLE-compressed BMPs (ImageMagick may produce these). CircuitPython's `OnDiskBitmap` requires uncompressed BMP files.
 
-```bash
-convert images/raw/aws_logo.png \
-    -resize 200x200 -background white -gravity center -extent 240x240 \
-    -colors 256 -type palette BMP3:images/logo.bmp
-```
+## Step 2 — Configure
 
-> Adjust `-resize 200x200` to control how much padding surrounds the logo. Use `240x240` for edge-to-edge, or smaller values for more whitespace.
-
-**Dark background variant** — use `-background black` if your logo is light-colored.
-
-### Verify the output
-
-```bash
-identify images/photo.bmp images/logo.bmp
-# Should show: BMP3 240x240 ... 8-bit sRGB 256c
-```
-
-## Step 2 — Configure Your LinkedIn URL
-
-Edit `code.py` and change the URL at the top:
+Edit `code.py`:
 
 ```python
 LINKEDIN_URL = "https://linkedin.com/in/your-profile"
 ```
 
-## Step 3 — Flash CircuitPython to the Badge
+To change your name on the photo slide, find the `_name_first` and `_name_last` labels.
 
-The badge needs CircuitPython firmware instead of the default Zephyr firmware.
+## Step 3 — Flash CircuitPython Firmware
 
-### Option A: Use a pre-built CircuitPython UF2
+The badge needs a custom CircuitPython build with `displayio` enabled.
 
-If you have a pre-built `circuitpython.uf2` for the Demo Badge:
-
-1. Enter bootloader mode: double-tap the reset button (or run `enter_bootloader` from the Zephyr serial shell)
-2. The badge appears as a USB drive (e.g. `DEMOBADGE` or `BOOT`)
-3. Copy the UF2 file to the drive:
+1. Enter bootloader: single-tap the reset button → badge mounts as `BADGE_BOOT`
+2. Copy the firmware:
    ```bash
-   cp circuitpython.uf2 /Volumes/DEMOBADGE/
+   cp firmware/circuitpython_internal.uf2 /Volumes/BADGE_BOOT/
    ```
-4. Badge reboots and mounts as `CIRCUITPY`
+3. Badge reboots and mounts as `CIRCUITPY` (~238KB filesystem)
 
-### Option B: Build CircuitPython from source
+> **Always use `circuitpython_internal.uf2`** — it uses internal flash. The QSPI build enters safe mode due to Zephyr's leftover filesystem.
 
-```bash
-cd circuitpython/
-./build.sh
-# Output: builds/circuitpython.uf2
-```
+### Display init notes
 
-Then flash as in Option A.
+The ST7789V display (1.69", 240×280, ER-TFT1.69-2) requires manual initialization in CircuitPython because `board.DISPLAY` is not configured in the board definition. The init sequence in `code.py` uses:
+- **MADCTL 0x00** (RGB color order)
+- **INVON** for correct color polarity on this panel
+- **No RAMCTRL** — the Zephyr firmware's RAMCTRL sets little-endian pixel byte order which is incompatible with CircuitPython's big-endian displayio
 
-## Step 4 — Deploy the Badge Program
-
-Once the badge is running CircuitPython and mounted as `CIRCUITPY`:
+## Step 4 — Deploy
 
 ```bash
-# Copy the main program
 cp code.py /Volumes/CIRCUITPY/
-
-# Copy your images
 mkdir -p /Volumes/CIRCUITPY/images/
 cp images/photo.bmp /Volumes/CIRCUITPY/images/
 cp images/logo.bmp /Volumes/CIRCUITPY/images/
@@ -117,55 +148,66 @@ The badge auto-reloads and starts the slideshow immediately.
 
 ### Slideshow
 
-The display cycles through 4 screens every 4 seconds:
+The display cycles through 4 screens every 6 seconds:
 
-1. Your photo
-2. Company logo
+1. Your photo (with name labels)
+2. Company logo (full-screen)
 3. QR code (LinkedIn)
 4. Live sensor readings (temperature, humidity, accelerometer, light)
 
-### Button Controls
+### Button Layout
 
-| Button | Position | Action |
-|--------|----------|--------|
-| B1 | Left | Previous slide |
-| B3 | Right | Next slide |
-| B2 | Top | Play / Pause auto-advance |
-| B4 | Bottom | Toggle LED light show |
+| Button | Physical Position | Action |
+|--------|-------------------|--------|
+| B4 | Left | Previous slide |
+| B2 | Right | Next slide |
+| B1 | Top | Play / Pause auto-advance |
+| B3 | Bottom | LED brightness: dim → medium → bright → off |
+
+> Note: The physical button positions differ from the silkscreen labels on the PCB.
 
 ### LED Light Show
 
-Press B4 to start a rainbow chase animation on the 3 NeoPixels. Press again to stop.
+Press bottom button (B3) to start a rainbow chase animation. Each press cycles through 3 brightness levels (10%, 30%, 60%), then turns off.
+
+## Memory Architecture
+
+The nRF52840 has 256KB RAM. After CircuitPython runtime and displayio buffers, ~107KB is free.
+
+Images use `displayio.OnDiskBitmap` which reads pixels directly from the CIRCUITPY flash filesystem — **zero RAM allocation** for pixel data. This avoids heap fragmentation that would otherwise cause `MemoryError` after several slideshow cycles.
+
+Sensor text updates are throttled to 1Hz to prevent string allocation from fragmenting the heap.
 
 ## Customization
 
 ### Slide duration
 
-In `code.py`:
 ```python
-SLIDE_DURATION = 4.0  # seconds
+SLIDE_DURATION = 6.0  # seconds per slide
 ```
 
-### LED brightness
+### LED brightness levels
 
 ```python
-NEOPIXEL_BRIGHTNESS = 0.3  # 0.0 to 1.0
+LED_BRIGHTNESS_LEVELS = (0.1, 0.3, 0.6)
 ```
 
 ## Reverting to Original Firmware
 
-1. Enter bootloader: double-tap reset button
-2. Copy the original Zephyr UF2: `cp firmware/build/zephyr.uf2 /Volumes/BOOT/`
-3. Or flash `firmware/adafruit_bootloader_demo_badge_2023/update-bootloader.uf2` first if needed
+1. Enter bootloader: single-tap reset button
+2. Copy the original Zephyr UF2: `cp firmware/original_zephyr.uf2 /Volumes/BADGE_BOOT/`
 
-The original Zephyr firmware and USB mass storage data are on separate flash partitions and are preserved.
+The original Zephyr firmware and QSPI flash data are on separate flash partitions and are preserved.
 
 ## Troubleshooting
 
-- **"Missing: /images/photo.bmp"** — image file not found on CIRCUITPY drive. Check the path.
-- **Display is blank** — check that `code.py` is on the root of CIRCUITPY. Open the serial console (`screen /dev/cu.usbmodem* 115200`) to see Python errors.
-- **Sensors show "not found"** — the CircuitPython build may not include the sensor library. Check that `adafruit_sht31d` and `adafruit_lsm6ds` are in the frozen modules.
-- **QR code too small** — the QR scales automatically. Shorter URLs produce larger QR modules.
+- **Display is blank** — check that `code.py` is on the root of CIRCUITPY. Connect serial console (`screen /dev/cu.usbmodem* 115200`) to see errors. Most likely: missing firmware with `displayio` enabled.
+- **Colors wrong on images** — ensure RAMCTRL (0xB0) is NOT in the display init sequence. The Zephyr firmware's RAMCTRL uses little-endian byte order incompatible with CircuitPython.
+- **"memory allocation failed"** — images must use `OnDiskBitmap` (not `adafruit_imageload`). Check sensor update throttling is in place (1Hz, not every loop).
+- **Sensors show "not found"** — the sensor libraries (`adafruit_sht31d`, `adafruit_lsm6ds`) must be frozen in the CircuitPython build.
+- **QR code hard to scan** — use a shorter URL (drop `www.`, trailing slashes). The QR auto-scales to fill the display.
+- **Safe mode / CIRCUITPY not found** — filesystem corrupted. Connect serial, enter REPL, run `import storage; storage.erase_filesystem()` to recreate it.
+- **Badge completely unresponsive** — see the Recovery section below.
 
 ---
 
@@ -173,14 +215,12 @@ The original Zephyr firmware and USB mass storage data are on separate flash par
 
 ```
 firmware/
-├── circuitpython_internal.uf2   # CircuitPython 8.2.7, INTERNAL_FLASH_FILESYSTEM=1 ← USE THIS
-├── circuitpython.uf2            # CircuitPython 8.2.7, QSPI_FLASH_FILESYSTEM=1 (broken — see Recovery)
+├── circuitpython_internal.uf2   # CircuitPython 8.2.7, INTERNAL_FLASH ← USE THIS
+├── circuitpython.uf2            # CircuitPython 8.2.7, QSPI_FLASH (broken — see Recovery)
 ├── original_zephyr.uf2          # Original Zephyr firmware (cannot flash via UF2 — targets 0x1000)
 ├── zephyr_fixed.uf2             # Zephyr with patched family ID (still targets 0x1000)
 └── zephyr_nrf_family.uf2        # Another Zephyr variant (still targets 0x1000)
 ```
-
-Always use `circuitpython_internal.uf2`. See the Recovery section for why.
 
 ### Flashing on Linux / WSL2
 

@@ -7,7 +7,6 @@ import neopixel
 import busio
 import analogio
 import terminalio
-import adafruit_imageload
 import adafruit_miniqr
 from adafruit_display_text import label
 
@@ -122,15 +121,11 @@ def load_image_into(group, path):
     while len(group):
         group.pop()
     gc.collect()
-    gc.collect()
-    gc.collect()
     try:
-        bmp, pal = adafruit_imageload.load(
-            path, bitmap=displayio.Bitmap, palette=displayio.Palette
-        )
+        bmp = displayio.OnDiskBitmap(path)
         group.y = (280 - bmp.height) // 2
         x_off = (240 - bmp.width) // 2
-        group.append(displayio.TileGrid(bmp, pixel_shader=pal, x=x_off))
+        group.append(displayio.TileGrid(bmp, pixel_shader=bmp.pixel_shader, x=x_off))
     except Exception as e:
         print("Image error", path, e)
         group.y = 0
@@ -280,6 +275,7 @@ def btn_pressed(btn):
 
 
 show_slide(0)
+last_advance = time.monotonic()
 
 while True:
     now = time.monotonic()

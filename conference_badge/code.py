@@ -12,7 +12,7 @@ import adafruit_miniqr
 from adafruit_display_text import label
 
 LINKEDIN_URL = "https://linkedin.com/in/3sztof"
-SLIDE_DURATION = 4.0
+SLIDE_DURATION = 6.0
 LED_BRIGHTNESS_LEVELS = (0.1, 0.3, 0.6)
 
 _event_pin = digitalio.DigitalInOut(board.EXPRESSLINK_EVENT)
@@ -118,23 +118,26 @@ def make_qr_group(url):
 
 
 def load_image_into(group, path):
+    display.auto_refresh = False
     while len(group):
         group.pop()
+    gc.collect()
     gc.collect()
     gc.collect()
     try:
         bmp, pal = adafruit_imageload.load(
             path, bitmap=displayio.Bitmap, palette=displayio.Palette
         )
-        x_off = (240 - bmp.width) // 2
-        y_off = (240 - bmp.height) // 2
-        group.append(displayio.TileGrid(bmp, pixel_shader=pal, x=x_off, y=y_off))
+        group.y = (280 - bmp.height) // 2
+        group.append(displayio.TileGrid(bmp, pixel_shader=pal))
     except Exception as e:
         print("Image error", path, e)
+        group.y = 0
         lbl = label.Label(terminalio.FONT, text=str(e), color=0xFF0000)
         lbl.anchor_point = (0.5, 0.5)
-        lbl.anchored_position = (120, 120)
+        lbl.anchored_position = (120, 140)
         group.append(lbl)
+    display.auto_refresh = True
 
 
 def make_sensor_group():
@@ -144,12 +147,12 @@ def make_sensor_group():
         terminalio.FONT, text="Sensor Readings", color=0x00AAFF, scale=2
     )
     title.anchor_point = (0.5, 0.0)
-    title.anchored_position = (120, 30)
+    title.anchored_position = (120, 20)
     group.append(title)
 
     readings = label.Label(terminalio.FONT, text="Loading...", color=0xFFFFFF, scale=1)
-    readings.anchor_point = (0.0, 0.0)
-    readings.anchored_position = (10, 70)
+    readings.anchor_point = (0.5, 0.0)
+    readings.anchored_position = (120, 55)
     group.append(readings)
 
     return group, readings
@@ -230,7 +233,13 @@ _IMAGE_PATHS = {
 sensor_group, sensor_readings_label = make_sensor_group()
 qr_group = make_qr_group(LINKEDIN_URL)
 _img_group = displayio.Group()
-_img_group.y = 20
+
+_name_first = label.Label(terminalio.FONT, text="Krzysztof", color=0xFFFFFF, scale=1)
+_name_first.anchor_point = (0.5, 0.5)
+_name_first.anchored_position = (120, -10)
+_name_last = label.Label(terminalio.FONT, text="Wilczynski", color=0xFFFFFF, scale=1)
+_name_last.anchor_point = (0.5, 0.5)
+_name_last.anchored_position = (120, 250)
 
 gc.collect()
 print("Free RAM after init:", gc.mem_free())
@@ -248,6 +257,9 @@ def show_slide(index):
     if current_slide in _IMAGE_PATHS:
         display.root_group = _img_group
         load_image_into(_img_group, _IMAGE_PATHS[current_slide])
+        if current_slide == SLIDE_PHOTO:
+            _img_group.append(_name_first)
+            _img_group.append(_name_last)
     elif current_slide == SLIDE_QR:
         display.root_group = qr_group
     elif current_slide == SLIDE_SENSORS:
